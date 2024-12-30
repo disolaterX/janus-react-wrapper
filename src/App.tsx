@@ -142,7 +142,7 @@ function App() {
         },
       });
     },
-    [sipPlugin, sipCredentials, sendToWebViewParent]
+    [sipPlugin, isRegistered, sipCredentials, sendToWebViewParent]
   );
 
   // Function to handle unregistration
