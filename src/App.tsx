@@ -483,7 +483,9 @@ function App() {
 
   return isWebViewReady ? (
     <div>WebView Ready - Call State: {callState}</div>
-  ) : null;
+  ) : (
+    <div>WebView Not Ready</div>
+  );
 }
 
 export default App;
