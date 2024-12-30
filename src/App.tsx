@@ -1,7 +1,13 @@
 import { useEffect, useState, useCallback } from "react";
 import type { JanusJS } from "janus-gateway";
-import Janus from "janus-gateway";
+// Import Janus differently to ensure it's loaded properly
+import JanusModule from "janus-gateway";
 import adapter from "webrtc-adapter";
+
+// Create a reference to the Janus constructor
+const Janus: typeof JanusModule = JanusModule;
+
+console.log("Janus import:", { Janus });
 
 // Define WebView interface types
 interface WebViewWindow extends Window {
@@ -76,9 +82,9 @@ function App() {
   const [callState, setCallState] = useState<CallState>("idle");
   const [currentCall, setCurrentCall] = useState<string | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
-  const janusDependencies = Janus.useDefaultDependencies({ adapter });
+  console.log({ isWebViewReady, Janus });
 
-  console.log(isWebViewReady);
+  const janusDependencies = Janus.useDefaultDependencies({ adapter });
 
   const [sipCredentials, setSipCredentials] = useState<SipRegistrationParams>(
     {}
@@ -350,6 +356,8 @@ function App() {
 
     const initializeJanus = () => {
       console.log("Initializing Janus...");
+      console.log({ isWebViewReady, Janus });
+
       Janus.init({
         debug: true,
         dependencies: janusDependencies,
@@ -481,7 +489,7 @@ function App() {
         });
       }
     };
-  }, [janusDependencies, handleRegistration, handleSipMessage, sendToWebView]);
+  }, [handleRegistration, handleSipMessage, sendToWebView]);
 
   return <div>WebView Ready - Call State: {callState}</div>;
 }
