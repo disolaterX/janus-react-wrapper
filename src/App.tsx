@@ -78,6 +78,8 @@ function App() {
   const [isRegistered, setIsRegistered] = useState(false);
   const janusDependencies = Janus.useDefaultDependencies({ adapter });
 
+  console.log(isWebViewReady);
+
   const [sipCredentials, setSipCredentials] = useState<SipRegistrationParams>(
     {}
   );
@@ -481,11 +483,7 @@ function App() {
     };
   }, [janusDependencies, handleRegistration, handleSipMessage, sendToWebView]);
 
-  return isWebViewReady ? (
-    <div>WebView Ready - Call State: {callState}</div>
-  ) : (
-    <div>WebView Not Ready</div>
-  );
+  return <div>WebView Ready - Call State: {callState}</div>;
 }
 
 export default App;
