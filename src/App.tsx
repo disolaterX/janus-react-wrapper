@@ -193,8 +193,7 @@ function App() {
       }
 
       // Extract domain from proxy and provide fallback
-      const proxyDomain =
-        sipCredentials.proxy?.split("sip:")[1] || "103.230.84.119:5080";
+      const proxyDomain = sipCredentials.proxy?.split("sip:")[1];
 
       setCurrentCall(phoneNumber);
       setCallState("calling");
@@ -236,6 +235,8 @@ function App() {
   // Handle messages from WebView
   useEffect(() => {
     const handleWebViewMessage = (event: MessageEvent<WebViewMessage>) => {
+      console.log(JSON.stringify(event, null, 2));
+
       const message = event.data;
 
       switch (message.type) {
