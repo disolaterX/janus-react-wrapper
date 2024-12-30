@@ -265,11 +265,13 @@ function App() {
   // Handle SIP plugin messages
   const handleSipMessage = useCallback(
     (msg: JanusJS.Message, jsep?: JanusJS.JSEP) => {
+      let localCallState = callState;
       const result = msg.result as SipPluginResult;
       console.log(JSON.stringify(msg, null, 2));
 
       if (result?.event) {
         setCallState(result.event as CallState);
+        localCallState = result.event as CallState;
       }
 
       if (msg.error) {
@@ -293,7 +295,7 @@ function App() {
         payload: {
           status: result?.event || "unknown",
           data: msg,
-          callState,
+          callState: localCallState,
         },
       });
 
