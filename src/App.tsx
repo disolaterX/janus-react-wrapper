@@ -41,7 +41,6 @@ type WebViewPayload = {
   kind?: string;
   isConnected?: boolean;
   state?: string;
-  registration?: SipRegistrationParams;
   callState?: CallState;
   errorDetails?: {
     code?: number;
@@ -64,7 +63,7 @@ interface SipPluginResult {
 }
 
 // Add new types for registration
-interface SipRegistrationParams {
+interface RegistrationPayload {
   username?: string;
   displayName?: string;
   authuser?: string;
@@ -84,9 +83,7 @@ function App() {
 
   const janusDependencies = Janus.useDefaultDependencies({ adapter });
 
-  const [sipCredentials, setSipCredentials] = useState<SipRegistrationParams>(
-    {}
-  );
+  const [sipCredentials, setSipCredentials] = useState<RegistrationPayload>({});
 
   // Function to send messages to WebView with retry mechanism
   const sendToWebView = useCallback(
@@ -120,7 +117,7 @@ function App() {
 
   // Function to handle registration
   const handleRegistration = useCallback(
-    (params?: SipRegistrationParams) => {
+    (params?: RegistrationPayload) => {
       if (!sipPlugin) {
         const error = "SIP plugin not found";
         console.error(error);
@@ -234,17 +231,16 @@ function App() {
 
   // Handle messages from WebView
   useEffect(() => {
-    const handleWebViewMessage = (event: MessageEvent<WebViewMessage>) => {
-      console.log(JSON.stringify(event, null, 2));
-
-      const message = event.data;
+    const handleWebViewMessage = (event: MessageEvent) => {
+      const message = JSON.parse(event.data as string) as WebViewMessage;
+      console.log(message);
 
       switch (message.type) {
         case "WEBVIEW_READY":
           setIsWebViewReady(true);
           break;
         case "REGISTER_SIP":
-          handleRegistration(message.payload?.registration);
+          handleRegistration(message.payload as RegistrationPayload);
           break;
         case "UNREGISTER_SIP":
           handleUnregister();
@@ -269,14 +265,11 @@ function App() {
       }
     };
 
-    window.addEventListener("message", handleWebViewMessage as EventListener);
+    window.addEventListener("message", handleWebViewMessage);
     sendToWebView({ type: "REACT_APP_READY", payload: {} });
 
     return () => {
-      window.removeEventListener(
-        "message",
-        handleWebViewMessage as EventListener
-      );
+      window.removeEventListener("message", handleWebViewMessage);
     };
   }, [
     sipPlugin,
@@ -291,28 +284,18 @@ function App() {
   // Handle SIP plugin messages
   const handleSipMessage = useCallback(
     (msg: JanusJS.Message, jsep?: JanusJS.JSEP) => {
-      console.log(msg.error || msg.result);
       const result = msg.result as SipPluginResult;
+      console.log(JSON.stringify(msg, null, 2));
+
+      if (result?.event) {
+        setCallState(result.event as CallState);
+      }
 
       // Handle registration states
       if (result?.event === "registered") {
         setIsRegistered(true);
-        setCallState("registered");
       } else if (result?.event === "unregistered") {
         setIsRegistered(false);
-        setCallState("idle");
-      }
-
-      // Handle call states
-      if (result?.event === "calling") {
-        setCallState("calling");
-      } else if (result?.event === "ringing") {
-        setCallState("ringing");
-      } else if (result?.event === "accepted") {
-        setCallState("connected");
-      } else if (result?.event === "hangup") {
-        setCallState("ended");
-        setCurrentCall(null);
       }
 
       sendToWebView({
@@ -320,7 +303,7 @@ function App() {
         payload: {
           status: result?.event || "unknown",
           data: msg,
-          callState: callState,
+          callState,
         },
       });
 
@@ -344,7 +327,7 @@ function App() {
         });
       }
     },
-    [callState, sendToWebView]
+    [callState, sendToWebView, sipPlugin]
   );
 
   // Initialize Janus with error handling and reconnection
@@ -352,11 +335,9 @@ function App() {
     let janus: JanusJS.Janus | null = null;
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 3;
-
     const initializeJanus = () => {
       console.log("Initializing Janus...");
       console.log({ isWebViewReady, Janus });
-
       Janus.init({
         debug: true,
         dependencies: janusDependencies,
