@@ -272,6 +272,15 @@ function App() {
         setCallState(result.event as CallState);
       }
 
+      if (msg.error) {
+        setCallState("error");
+        sendToWebViewParent({
+          type: "SIP_ERROR",
+          payload: { error: msg.error, callState: "error" },
+        });
+        return;
+      }
+
       // Handle registration states
       if (result?.event === "registered") {
         setIsRegistered(true);
