@@ -21,7 +21,9 @@ type CallState =
   | "destroyed"
   | "cleaned"
   | "not_started"
-  | "initializing";
+  | "initializing"
+  | "ready";
+
 // Define message payload types
 type WebViewPayload = {
   phoneNumber?: string;
@@ -377,6 +379,7 @@ function App() {
         success: (pluginHandle: JanusJS.PluginHandle) => {
           setSipPlugin(pluginHandle);
           sendToWebViewParent({ type: "SIP_READY", payload: {} });
+          setCallState("ready");
         },
         error: (error: string) => {
           console.error("Error attaching to SIP plugin:", error);
