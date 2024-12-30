@@ -482,14 +482,8 @@ function App() {
   }, [janusDependencies, handleRegistration, handleSipMessage, sendToWebView]);
 
   return isWebViewReady ? (
-    <div style={{ display: "none" }}>
-      WebView Ready - Call State: {callState}
-    </div>
-  ) : (
-    <div>
-      <h1>WebView Not Ready</h1>
-    </div>
-  );
+    <div>WebView Ready - Call State: {callState}</div>
+  ) : null;
 }
 
 export default App;
