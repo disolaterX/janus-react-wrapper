@@ -486,7 +486,9 @@ function App() {
       WebView Ready - Call State: {callState}
     </div>
   ) : (
-    <></>
+    <div>
+      <h1>WebView Not Ready</h1>
+    </div>
   );
 }
 
