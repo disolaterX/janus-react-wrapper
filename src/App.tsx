@@ -7,8 +7,6 @@ import adapter from "webrtc-adapter";
 // Create a reference to the Janus constructor
 const Janus: typeof JanusModule = JanusModule;
 
-console.log("Janus import:", { Janus });
-
 // Define WebView interface types
 interface WebViewWindow extends Window {
   webkit?: {
@@ -102,13 +100,13 @@ function App() {
         } else if (webViewWindow.android?.onJanusMessage) {
           webViewWindow.android.onJanusMessage(JSON.stringify(message));
         } else {
-          console.log(
-            "WebView interface not found, running in browser:",
-            message
-          );
-          if (retryCount > 0) {
-            setTimeout(() => sendToWebView(message, retryCount - 1), 1000);
-          }
+          // console.log(
+          //   "WebView interface not found, running in browser:",
+          //   message
+          // );
+          // if (retryCount > 0) {
+          //   setTimeout(() => sendToWebView(message, retryCount - 1), 1000);
+          // }
         }
       } catch (error) {
         console.error("Error sending message to WebView:", error);
@@ -415,7 +413,6 @@ function App() {
         plugin: "janus.plugin.sip",
         success: (pluginHandle: JanusJS.PluginHandle) => {
           setSipPlugin(pluginHandle);
-          handleRegistration();
           sendToWebView({ type: "SIP_READY", payload: {} });
         },
         error: (error: string) => {
@@ -467,8 +464,11 @@ function App() {
     };
 
     initializeJanus();
+    console.log("App mounted");
 
     return () => {
+      console.log("App unmounting");
+
       if (sipPlugin) {
         sipPlugin.detach({
           success: () => {
@@ -489,7 +489,7 @@ function App() {
         });
       }
     };
-  }, [handleRegistration, handleSipMessage, sendToWebView]);
+  }, []);
 
   return <div>WebView Ready - Call State: {callState}</div>;
 }
