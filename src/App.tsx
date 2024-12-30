@@ -314,6 +314,12 @@ function App() {
           jsep,
           success: () => {
             console.log("Remote jsep handled successfully");
+            sendToWebViewParent({
+              type: "JSEP_SUCCESS",
+              payload: {
+                callState: "connected",
+              },
+            });
           },
           error: (error: string) => {
             console.error(error);
@@ -321,10 +327,8 @@ function App() {
               type: "JSEP_ERROR",
               payload: {
                 error,
-                callState: "error",
               },
             });
-            setCallState("error");
           },
         });
       }
@@ -416,18 +420,30 @@ function App() {
           });
         },
         onmessage: handleSipMessage,
-        onlocaltrack: (track: MediaStreamTrack) => {
+        consentDialog: (on: boolean) => {
+          console.log("Consent dialog:", on);
+          sendToWebViewParent({
+            type: "CONSENT_DIALOG",
+            payload: {},
+          });
+        },
+        onlocaltrack: (track: MediaStreamTrack, on: boolean) => {
           console.log("Local track available:", track);
           sendToWebViewParent({
             type: "LOCAL_TRACK_READY",
-            payload: { kind: track.kind },
+            payload: { state: JSON.stringify({ track, on }) },
           });
         },
-        onremotetrack: (track: MediaStreamTrack) => {
-          console.log("Remote track available:", track);
+        onremotetrack: (
+          track: MediaStreamTrack,
+          mid: string,
+          on: boolean,
+          metadata?: JanusJS.RemoteTrackMetadata
+        ) => {
+          console.log("Remote track available:", track, mid, on, metadata);
           sendToWebViewParent({
             type: "REMOTE_TRACK_READY",
-            payload: { kind: track.kind },
+            payload: { state: JSON.stringify({ track, mid, on, metadata }) },
           });
         },
         oncleanup: () => {
@@ -441,6 +457,24 @@ function App() {
           sendToWebViewParent({
             type: "WEBRTC_STATE",
             payload: { isConnected },
+          });
+        },
+        mediaState: (
+          medium: "audio" | "video",
+          receiving: boolean,
+          mid?: number
+        ) => {
+          console.log("Media state changed:", medium, receiving, mid);
+          sendToWebViewParent({
+            type: "MEDIA_STATE",
+            payload: { state: JSON.stringify({ medium, receiving, mid }) },
+          });
+        },
+        slowLink: (uplink: boolean, lost: number, mid: string) => {
+          console.log("Slow link:", uplink, lost, mid);
+          sendToWebViewParent({
+            type: "SLOW_LINK",
+            payload: { state: JSON.stringify({ uplink, lost, mid }) },
           });
         },
         iceState: (state) => {
