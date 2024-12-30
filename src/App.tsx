@@ -485,7 +485,9 @@ function App() {
     <div style={{ display: "none" }}>
       WebView Ready - Call State: {callState}
     </div>
-  ) : null;
+  ) : (
+    <></>
+  );
 }
 
 export default App;
