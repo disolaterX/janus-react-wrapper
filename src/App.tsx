@@ -7,20 +7,6 @@ import adapter from "webrtc-adapter";
 // Create a reference to the Janus constructor
 const Janus: typeof JanusModule = JanusModule;
 
-// Define WebView interface types
-interface WebViewWindow extends Window {
-  webkit?: {
-    messageHandlers?: {
-      janusHandler?: {
-        postMessage: (message: unknown) => void;
-      };
-    };
-  };
-  android?: {
-    onJanusMessage: (message: string) => void;
-  };
-}
-
 // Define call states
 type CallState =
   | "idle"
@@ -33,7 +19,9 @@ type CallState =
   | "error"
   | "starting"
   | "destroyed"
-  | "cleaned";
+  | "cleaned"
+  | "not_started"
+  | "initializing";
 // Define message payload types
 type WebViewPayload = {
   phoneNumber?: string;
@@ -78,7 +66,7 @@ interface RegistrationPayload {
 function App() {
   const [sipPlugin, setSipPlugin] = useState<JanusJS.PluginHandle | null>(null);
   const [isWebViewReady, setIsWebViewReady] = useState(false);
-  const [callState, setCallState] = useState<CallState>("starting");
+  const [callState, setCallState] = useState<CallState>("not_started");
   const [currentCall, setCurrentCall] = useState<string | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
   console.log({ isWebViewReady, Janus });
@@ -88,29 +76,18 @@ function App() {
   const [sipCredentials, setSipCredentials] = useState<RegistrationPayload>({});
 
   // Function to send messages to WebView with retry mechanism
-  const sendToWebView = useCallback(
+  const sendToWebViewParent = useCallback(
     (message: WebViewMessage, retryCount = 3) => {
-      const webViewWindow = window as WebViewWindow;
       try {
-        if (webViewWindow.webkit?.messageHandlers?.janusHandler) {
-          webViewWindow.webkit.messageHandlers.janusHandler.postMessage(
-            message
-          );
-        } else if (webViewWindow.android?.onJanusMessage) {
-          webViewWindow.android.onJanusMessage(JSON.stringify(message));
-        } else {
-          // console.log(
-          //   "WebView interface not found, running in browser:",
-          //   message
-          // );
-          // if (retryCount > 0) {
-          //   setTimeout(() => sendToWebView(message, retryCount - 1), 1000);
-          // }
-        }
+        (
+          window as unknown as {
+            ReactNativeWebView?: { postMessage: (message: string) => void };
+          }
+        ).ReactNativeWebView?.postMessage(JSON.stringify(message));
       } catch (error) {
         console.error("Error sending message to WebView:", error);
         if (retryCount > 0) {
-          setTimeout(() => sendToWebView(message, retryCount - 1), 1000);
+          setTimeout(() => sendToWebViewParent(message, retryCount - 1), 1000);
         }
       }
     },
@@ -123,7 +100,7 @@ function App() {
       if (!sipPlugin) {
         const error = "SIP plugin not found";
         console.error(error);
-        sendToWebView({ type: "REGISTRATION_ERROR", payload: { error } });
+        sendToWebViewParent({ type: "REGISTRATION_ERROR", payload: { error } });
         return;
       }
 
@@ -153,7 +130,7 @@ function App() {
         },
       });
     },
-    [sipPlugin, sipCredentials, sendToWebView]
+    [sipPlugin, sipCredentials, sendToWebViewParent]
   );
 
   // Function to handle unregistration
@@ -172,7 +149,7 @@ function App() {
       if (!sipPlugin) {
         const error = "SIP plugin not found";
         console.error(error);
-        sendToWebView({
+        sendToWebViewParent({
           type: "CALL_ERROR",
           payload: { error, callState: "error" },
         });
@@ -183,7 +160,7 @@ function App() {
       if (!phoneNumber) {
         const error = "Phone number is required";
         console.error(error);
-        sendToWebView({
+        sendToWebViewParent({
           type: "CALL_ERROR",
           payload: { error, callState: "error" },
         });
@@ -207,7 +184,7 @@ function App() {
             },
             jsep,
           });
-          sendToWebView({
+          sendToWebViewParent({
             type: "CALL_INITIATED",
             payload: {
               phoneNumber,
@@ -217,7 +194,7 @@ function App() {
         },
         error: (error: Error) => {
           console.error("Error creating offer:", error);
-          sendToWebView({
+          sendToWebViewParent({
             type: "CALL_ERROR",
             payload: {
               error: error.message,
@@ -228,7 +205,7 @@ function App() {
         },
       });
     },
-    [sipPlugin, sipCredentials, sendToWebView]
+    [sipPlugin, sipCredentials, sendToWebViewParent]
   );
 
   // Handle messages from WebView
@@ -249,7 +226,7 @@ function App() {
           break;
         case "MAKE_CALL":
           if (!isRegistered) {
-            sendToWebView({
+            sendToWebViewParent({
               type: "CALL_ERROR",
               payload: { error: "Not registered with SIP server" },
             });
@@ -268,7 +245,7 @@ function App() {
     };
 
     window.addEventListener("message", handleWebViewMessage);
-    sendToWebView({ type: "REACT_APP_READY", payload: {} });
+    sendToWebViewParent({ type: "REACT_APP_READY", payload: {} });
 
     return () => {
       window.removeEventListener("message", handleWebViewMessage);
@@ -279,7 +256,7 @@ function App() {
     currentCall,
     handleRegistration,
     handleUnregister,
-    sendToWebView,
+    sendToWebViewParent,
     makeCall,
   ]);
 
@@ -300,7 +277,7 @@ function App() {
         setIsRegistered(false);
       }
 
-      sendToWebView({
+      sendToWebViewParent({
         type: "SIP_STATUS",
         payload: {
           status: result?.event || "unknown",
@@ -317,7 +294,7 @@ function App() {
           },
           error: (error: string) => {
             console.error(error);
-            sendToWebView({
+            sendToWebViewParent({
               type: "JSEP_ERROR",
               payload: {
                 error,
@@ -329,7 +306,7 @@ function App() {
         });
       }
     },
-    [callState, sendToWebView, sipPlugin]
+    [callState, sendToWebViewParent, sipPlugin]
   );
 
   // Initialize Janus with error handling and reconnection
@@ -338,8 +315,8 @@ function App() {
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 3;
     const initializeJanus = () => {
+      setCallState("initializing");
       console.log("Initializing Janus...");
-      console.log({ isWebViewReady, Janus });
       Janus.init({
         debug: true,
         dependencies: janusDependencies,
@@ -353,13 +330,14 @@ function App() {
             ipv6: false,
             withCredentials: false,
             success: () => {
+              sendToWebViewParent({ type: "JANUS_READY", payload: {} });
               reconnectAttempts = 0; // Reset reconnect attempts on successful connection
               attachSipPlugin();
             },
             error: (error: string) => {
               console.error("Error creating Janus session:", error);
               setCallState("error");
-              sendToWebView({
+              sendToWebViewParent({
                 type: "JANUS_ERROR",
                 payload: {
                   error,
@@ -381,7 +359,7 @@ function App() {
             },
             destroyed: () => {
               console.log("Janus session destroyed");
-              sendToWebView({ type: "JANUS_DESTROYED", payload: {} });
+              sendToWebViewParent({ type: "JANUS_DESTROYED", payload: {} });
               setIsRegistered(false);
               setCallState("destroyed");
               setSipPlugin(null);
@@ -398,11 +376,11 @@ function App() {
         plugin: "janus.plugin.sip",
         success: (pluginHandle: JanusJS.PluginHandle) => {
           setSipPlugin(pluginHandle);
-          sendToWebView({ type: "SIP_READY", payload: {} });
+          sendToWebViewParent({ type: "SIP_READY", payload: {} });
         },
         error: (error: string) => {
           console.error("Error attaching to SIP plugin:", error);
-          sendToWebView({
+          sendToWebViewParent({
             type: "SIP_ERROR",
             payload: {
               error,
@@ -416,53 +394,53 @@ function App() {
         onmessage: handleSipMessage,
         onlocaltrack: (track: MediaStreamTrack) => {
           console.log("Local track available:", track);
-          sendToWebView({
+          sendToWebViewParent({
             type: "LOCAL_TRACK_READY",
             payload: { kind: track.kind },
           });
         },
         onremotetrack: (track: MediaStreamTrack) => {
           console.log("Remote track available:", track);
-          sendToWebView({
+          sendToWebViewParent({
             type: "REMOTE_TRACK_READY",
             payload: { kind: track.kind },
           });
         },
         oncleanup: () => {
           console.log("SIP plugin cleaned up");
-          sendToWebView({ type: "SIP_CLEANUP", payload: {} });
+          sendToWebViewParent({ type: "SIP_CLEANUP", payload: {} });
           setCallState("cleaned");
           setCurrentCall(null);
         },
         webrtcState: (isConnected) => {
           console.log("WebRTC state changed:", isConnected);
-          sendToWebView({
+          sendToWebViewParent({
             type: "WEBRTC_STATE",
             payload: { isConnected },
           });
         },
         iceState: (state) => {
           console.log("ICE state changed:", state);
-          sendToWebView({ type: "ICE_STATE", payload: { state } });
+          sendToWebViewParent({ type: "ICE_STATE", payload: { state } });
         },
       });
     };
 
     initializeJanus();
-    console.log("App mounted");
+    sendToWebViewParent({ type: "APP_MOUNTED", payload: {} });
 
     return () => {
-      console.log("App unmounting");
+      sendToWebViewParent({ type: "APP_UNMOUNTED", payload: {} });
 
       if (sipPlugin) {
         sipPlugin.detach({
           success: () => {
             console.log("SIP plugin detached");
-            sendToWebView({ type: "SIP_DETACHED", payload: {} });
+            sendToWebViewParent({ type: "SIP_DETACHED", payload: {} });
           },
           error: (error: string) => {
             console.error("Error detaching SIP plugin:", error);
-            sendToWebView({ type: "DETACH_ERROR", payload: { error } });
+            sendToWebViewParent({ type: "DETACH_ERROR", payload: { error } });
           },
         });
       }
