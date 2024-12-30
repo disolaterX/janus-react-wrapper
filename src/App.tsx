@@ -187,7 +187,7 @@ function App() {
       setCallState("calling");
 
       sipPlugin.createOffer({
-        tracks: [{ type: "audio", capture: true }],
+        tracks: [{ type: "audio", capture: true, recv: true }],
         success: (jsep: JanusJS.JSEP) => {
           sipPlugin.send({
             message: {
