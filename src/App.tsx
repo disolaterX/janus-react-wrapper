@@ -106,6 +106,16 @@ function App() {
         return;
       }
 
+      // Check if already registered
+      if (isRegistered) {
+        console.log("Already registered with SIP server");
+        sendToWebViewParent({
+          type: "REGISTRATION_ERROR",
+          payload: { error: "Already registered with SIP server" },
+        });
+        return;
+      }
+
       setCallState("registering");
 
       // Merge provided params with defaults
