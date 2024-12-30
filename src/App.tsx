@@ -38,6 +38,16 @@ type WebViewPayload = {
     code?: number;
     message: string;
   };
+  // Add new fields for SIP events
+  from?: string;
+  hasAudio?: boolean;
+  hasVideo?: boolean;
+  callId?: string;
+  reason?: string;
+  code?: number;
+  // Add fields for media tracks
+  trackId?: string;
+  mid?: string;
 };
 
 // Define types for WebView messages
@@ -65,13 +75,87 @@ interface RegistrationPayload {
   register?: boolean;
 }
 
+// Add SipPlugin type that extends PluginHandle
+interface SipPlugin extends JanusJS.PluginHandle {
+  callId?: string;
+  doAudio?: boolean;
+  doVideo?: boolean;
+}
+
+// Add track management state
+interface TrackState {
+  [key: string]: MediaStream;
+}
+
+// Add styles at the top of the file
+const styles = {
+  sipContainer: {
+    display: "flex",
+    flexDirection: "column" as const,
+    height: "100vh",
+    padding: "20px",
+    gap: "20px",
+  },
+  statusBar: {
+    padding: "10px",
+    backgroundColor: "#f5f5f5",
+    borderRadius: "4px",
+  },
+  videoContainer: {
+    display: "flex",
+    flex: 1,
+    gap: "20px",
+    minHeight: "400px",
+  },
+  videoBox: {
+    flex: 1,
+    backgroundColor: "#000",
+    borderRadius: "8px",
+    overflow: "hidden",
+    position: "relative" as const,
+  },
+  video: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover" as const,
+  },
+  noVideo: {
+    position: "absolute" as const,
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%)",
+    color: "#fff",
+    textAlign: "center" as const,
+  },
+  controls: {
+    display: "flex",
+    gap: "10px",
+    justifyContent: "center",
+  },
+  button: {
+    padding: "10px 20px",
+    borderRadius: "4px",
+    border: "none",
+    backgroundColor: "#007bff",
+    color: "#fff",
+    cursor: "pointer",
+    ":hover": {
+      backgroundColor: "#0056b3",
+    },
+  },
+};
+
 function App() {
-  const [sipPlugin, setSipPlugin] = useState<JanusJS.PluginHandle | null>(null);
-  const [isWebViewReady, setIsWebViewReady] = useState(false);
+  const [sipPlugin, setSipPlugin] = useState<SipPlugin | null>(null);
+  // const [isWebViewReady, setIsWebViewReady] = useState(false);
   const [callState, setCallState] = useState<CallState>("not_started");
   const [currentCall, setCurrentCall] = useState<string | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
-  console.log({ isWebViewReady, Janus });
+  const [localTracks, setLocalTracks] = useState<TrackState>({});
+  const [remoteTracks, setRemoteTracks] = useState<TrackState>({});
+  const [localVideos, setLocalVideos] = useState(0);
+  const [remoteVideos, setRemoteVideos] = useState(0);
+  // console.log({ isWebViewReady, Janus });
 
   const janusDependencies = Janus.useDefaultDependencies({ adapter });
 
@@ -186,13 +270,27 @@ function App() {
       setCurrentCall(phoneNumber);
       setCallState("calling");
 
+      // Set audio properties
+      sipPlugin.doAudio = true;
+      sipPlugin.doVideo = false;
+
       sipPlugin.createOffer({
-        tracks: [{ type: "audio", capture: true, recv: true }],
+        tracks: [
+          { type: "audio", capture: true, recv: true },
+          // Uncomment below if you want video
+          // { type: "video", capture: true, recv: true }
+        ],
+        trickle: true,
         success: (jsep: JanusJS.JSEP) => {
           sipPlugin.send({
             message: {
               request: "call",
               uri: `sip:${phoneNumber}@${proxyDomain}`,
+              // Add headers for better compatibility
+              headers: {
+                "User-Agent": sipCredentials.userAgent || "Janus WebRTC Client",
+                "X-Call-Type": "audio",
+              },
             },
             jsep,
           });
@@ -228,7 +326,7 @@ function App() {
 
       switch (message.type) {
         case "WEBVIEW_READY":
-          setIsWebViewReady(true);
+          // setIsWebViewReady(true);
           break;
         case "REGISTER_SIP":
           handleRegistration(message.payload as RegistrationPayload);
@@ -275,13 +373,11 @@ function App() {
   // Handle SIP plugin messages
   const handleSipMessage = useCallback(
     (msg: JanusJS.Message, jsep?: JanusJS.JSEP) => {
-      let localCallState = callState;
       const result = msg.result as SipPluginResult;
       console.log(JSON.stringify(msg, null, 2));
 
       if (result?.event) {
         setCallState(result.event as CallState);
-        localCallState = result.event as CallState;
       }
 
       if (msg.error) {
@@ -293,23 +389,98 @@ function App() {
         return;
       }
 
-      // Handle registration states
-      if (result?.event === "registered") {
-        setIsRegistered(true);
-      } else if (result?.event === "unregistered") {
-        setIsRegistered(false);
+      // Handle various SIP events
+      if (result?.event) {
+        switch (result.event) {
+          case "registered":
+            setIsRegistered(true);
+            sendToWebViewParent({
+              type: "REGISTRATION_SUCCESS",
+              payload: { status: "registered" },
+            });
+            break;
+          case "unregistered":
+            setIsRegistered(false);
+            sendToWebViewParent({
+              type: "UNREGISTERED",
+              payload: { status: "unregistered" },
+            });
+            break;
+          case "calling":
+            sendToWebViewParent({
+              type: "CALLING",
+              payload: { status: "calling" },
+            });
+            break;
+          case "incomingcall": {
+            // Handle incoming call
+            const callId = msg["call_id"] as string;
+            if (sipPlugin) {
+              sipPlugin.callId = callId;
+            }
+
+            // Check what has been negotiated
+            let doAudio = true,
+              doVideo = false;
+            if (jsep && jsep.sdp) {
+              doAudio = jsep.sdp.indexOf("m=audio ") > -1;
+              doVideo = jsep.sdp.indexOf("m=video ") > -1;
+            }
+
+            sendToWebViewParent({
+              type: "INCOMING_CALL",
+              payload: {
+                from: result["username"] as string,
+                hasAudio: doAudio,
+                hasVideo: doVideo,
+                callId: callId,
+              },
+            });
+            break;
+          }
+          case "accepting":
+            // Response to an offerless INVITE
+            sendToWebViewParent({
+              type: "ACCEPTING",
+              payload: { status: "accepting" },
+            });
+            break;
+          case "progress":
+            // Early media
+            sendToWebViewParent({
+              type: "CALL_PROGRESS",
+              payload: { status: "progress" },
+            });
+            if (jsep) {
+              sipPlugin?.handleRemoteJsep({ jsep });
+            }
+            break;
+          case "accepted":
+            sendToWebViewParent({
+              type: "CALL_ACCEPTED",
+              payload: { status: "accepted" },
+            });
+            if (jsep) {
+              sipPlugin?.handleRemoteJsep({ jsep });
+            }
+            break;
+          case "hangup":
+            setCurrentCall(null);
+            setCallState("ended");
+            sendToWebViewParent({
+              type: "CALL_ENDED",
+              payload: {
+                reason: result["reason"] as string,
+                code: result["code"] as number,
+              },
+            });
+            break;
+        }
       }
 
-      sendToWebViewParent({
-        type: "SIP_STATUS",
-        payload: {
-          status: result?.event || "unknown",
-          data: msg,
-          callState: localCallState,
-        },
-      });
-
+      // Handle JSEP
       if (jsep) {
+        console.log("Handling JSEP", jsep);
         sipPlugin?.handleRemoteJsep({
           jsep,
           success: () => {
@@ -322,7 +493,7 @@ function App() {
             });
           },
           error: (error: string) => {
-            console.error(error);
+            console.error("JSEP error:", error);
             sendToWebViewParent({
               type: "JSEP_ERROR",
               payload: {
@@ -402,7 +573,7 @@ function App() {
       janus.attach({
         plugin: "janus.plugin.sip",
         success: (pluginHandle: JanusJS.PluginHandle) => {
-          setSipPlugin(pluginHandle);
+          setSipPlugin(pluginHandle as SipPlugin);
           sendToWebViewParent({ type: "SIP_READY", payload: {} });
           setCallState("ready");
         },
@@ -424,30 +595,108 @@ function App() {
           console.log("Consent dialog:", on);
           sendToWebViewParent({
             type: "CONSENT_DIALOG",
-            payload: {},
+            payload: { state: on ? "on" : "off" },
           });
         },
         onlocaltrack: (track: MediaStreamTrack, on: boolean) => {
-          console.log("Local track available:", track);
+          console.log("Local track " + (on ? "added" : "removed") + ":", track);
+          const trackId = track.id.replace(/[{}]/g, "");
+
+          if (!on) {
+            // Track removed, get rid of the stream and the rendering
+            const stream = localTracks[trackId];
+            if (stream) {
+              try {
+                const tracks = stream.getTracks();
+                tracks.forEach((track) => track.stop());
+              } catch (e) {
+                console.error("Error stopping tracks:", e);
+              }
+            }
+
+            if (track.kind === "video") {
+              setLocalVideos((prev) => prev - 1);
+            }
+
+            setLocalTracks((prev) => {
+              const newTracks = { ...prev };
+              delete newTracks[trackId];
+              return newTracks;
+            });
+
+            return;
+          }
+
+          // If we're here, a new track was added
+          const stream = new MediaStream([track]);
+          setLocalTracks((prev) => ({
+            ...prev,
+            [trackId]: stream,
+          }));
+
+          if (track.kind === "video") {
+            setLocalVideos((prev) => prev + 1);
+          }
+
           sendToWebViewParent({
             type: "LOCAL_TRACK_READY",
-            payload: { state: JSON.stringify({ track, on }) },
+            payload: {
+              kind: track.kind,
+              trackId,
+              state: on ? "added" : "removed",
+            },
           });
         },
-        onremotetrack: (
-          track: MediaStreamTrack,
-          mid: string,
-          on: boolean,
-          metadata?: JanusJS.RemoteTrackMetadata
-        ) => {
-          console.log("Remote track available:", track, mid, on, metadata);
+        onremotetrack: (track: MediaStreamTrack, mid: string, on: boolean) => {
+          console.log(
+            "Remote track (mid=" +
+              mid +
+              ") " +
+              (on ? "added" : "removed") +
+              ":",
+            track
+          );
+
+          if (!on) {
+            if (track.kind === "video") {
+              setRemoteVideos((prev) => prev - 1);
+            }
+
+            setRemoteTracks((prev) => {
+              const newTracks = { ...prev };
+              delete newTracks[mid];
+              return newTracks;
+            });
+
+            return;
+          }
+
+          // If we're here, a new track was added
+          const stream = new MediaStream([track]);
+          setRemoteTracks((prev) => ({
+            ...prev,
+            [mid]: stream,
+          }));
+
+          if (track.kind === "video") {
+            setRemoteVideos((prev) => prev + 1);
+          }
+
           sendToWebViewParent({
             type: "REMOTE_TRACK_READY",
-            payload: { state: JSON.stringify({ track, mid, on, metadata }) },
+            payload: {
+              kind: track.kind,
+              mid,
+              state: on ? "added" : "removed",
+            },
           });
         },
         oncleanup: () => {
           console.log("SIP plugin cleaned up");
+          setLocalTracks({});
+          setRemoteTracks({});
+          setLocalVideos(0);
+          setRemoteVideos(0);
           sendToWebViewParent({ type: "SIP_CLEANUP", payload: {} });
           setCallState("cleaned");
           setCurrentCall(null);
@@ -512,7 +761,135 @@ function App() {
     };
   }, []);
 
-  return <div>WebView Ready - Call State: {callState}</div>;
+  return (
+    <div style={styles.sipContainer}>
+      <div style={styles.statusBar}>
+        WebView Ready - Call State: {callState}
+      </div>
+
+      <div style={styles.videoContainer}>
+        <div style={styles.videoBox}>
+          {/* Add audio elements for local tracks */}
+          {Object.entries(localTracks).map(([trackId, stream]) => {
+            const track = stream.getTracks()[0];
+            if (track.kind === "audio") {
+              return (
+                <audio
+                  key={trackId}
+                  autoPlay
+                  playsInline
+                  muted // Local audio should be muted to prevent echo
+                  ref={(el) => {
+                    if (el) {
+                      el.srcObject = stream;
+                    }
+                  }}
+                />
+              );
+            }
+            return null;
+          })}
+
+          {localVideos === 0 ? (
+            <div style={styles.noVideo}>No local video</div>
+          ) : (
+            Object.entries(localTracks).map(([trackId, stream]) => {
+              const track = stream.getTracks()[0];
+              if (track.kind === "video") {
+                return (
+                  <video
+                    key={trackId}
+                    style={styles.video}
+                    autoPlay
+                    playsInline
+                    muted
+                    ref={(el) => {
+                      if (el) {
+                        el.srcObject = stream;
+                      }
+                    }}
+                  />
+                );
+              }
+              return null;
+            })
+          )}
+        </div>
+
+        <div style={styles.videoBox}>
+          {/* Add audio elements for remote tracks */}
+          {Object.entries(remoteTracks).map(([mid, stream]) => {
+            const track = stream.getTracks()[0];
+            if (track.kind === "audio") {
+              return (
+                <audio
+                  key={mid}
+                  autoPlay
+                  playsInline
+                  ref={(el) => {
+                    if (el) {
+                      el.srcObject = stream;
+                    }
+                  }}
+                />
+              );
+            }
+            return null;
+          })}
+
+          {remoteVideos === 0 ? (
+            <div style={styles.noVideo}>No remote video</div>
+          ) : (
+            Object.entries(remoteTracks).map(([mid, stream]) => {
+              const track = stream.getTracks()[0];
+              if (track.kind === "video") {
+                return (
+                  <video
+                    key={mid}
+                    style={styles.video}
+                    autoPlay
+                    playsInline
+                    ref={(el) => {
+                      if (el) {
+                        el.srcObject = stream;
+                      }
+                    }}
+                  />
+                );
+              }
+              return null;
+            })
+          )}
+        </div>
+      </div>
+
+      <div style={styles.controls}>
+        <button
+          style={styles.button}
+          onClick={() => {
+            makeCall("9999202499");
+          }}
+        >
+          Make Call
+        </button>
+        <button
+          style={styles.button}
+          onClick={() => {
+            handleRegistration({
+              username: "sip:su_251950@103.230.84.119:5080",
+              displayName: "su_251950",
+              authuser: "su_251950",
+              secret: "hJhGU0lI",
+              proxy: "sip:103.230.84.119:5080",
+              userAgent: "com.superfone",
+            });
+          }}
+        >
+          Register
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default App;
