@@ -30,8 +30,10 @@ type CallState =
   | "ringing"
   | "connected"
   | "ended"
-  | "error";
-
+  | "error"
+  | "starting"
+  | "destroyed"
+  | "cleaned";
 // Define message payload types
 type WebViewPayload = {
   phoneNumber?: string;
@@ -76,7 +78,7 @@ interface RegistrationPayload {
 function App() {
   const [sipPlugin, setSipPlugin] = useState<JanusJS.PluginHandle | null>(null);
   const [isWebViewReady, setIsWebViewReady] = useState(false);
-  const [callState, setCallState] = useState<CallState>("idle");
+  const [callState, setCallState] = useState<CallState>("starting");
   const [currentCall, setCurrentCall] = useState<string | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
   console.log({ isWebViewReady, Janus });
@@ -356,6 +358,7 @@ function App() {
             },
             error: (error: string) => {
               console.error("Error creating Janus session:", error);
+              setCallState("error");
               sendToWebView({
                 type: "JANUS_ERROR",
                 payload: {
@@ -380,7 +383,7 @@ function App() {
               console.log("Janus session destroyed");
               sendToWebView({ type: "JANUS_DESTROYED", payload: {} });
               setIsRegistered(false);
-              setCallState("idle");
+              setCallState("destroyed");
               setSipPlugin(null);
             },
           });
@@ -428,7 +431,7 @@ function App() {
         oncleanup: () => {
           console.log("SIP plugin cleaned up");
           sendToWebView({ type: "SIP_CLEANUP", payload: {} });
-          setCallState("idle");
+          setCallState("cleaned");
           setCurrentCall(null);
         },
         webrtcState: (isConnected) => {
